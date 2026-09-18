@@ -1,6 +1,7 @@
 package com.tomasthrawat.spacebudsz
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
@@ -13,7 +14,6 @@ import android.media.audiofx.LoudnessEnhancer
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
-import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -31,25 +31,24 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var audioManager: AudioManager
 
-    private var testTrack: AudioTrack? = null
-    private var equalizer: Equalizer? = null
-    private var bassBoost: BassBoost? = null
-    private var loudnessEnhancer: LoudnessEnhancer? = null
+    private var track: AudioTrack? = null
+    private var eq: Equalizer? = null
+    private var bass: BassBoost? = null
+    private var loudness: LoudnessEnhancer? = null
+    private var route: AudioDeviceInfo? = null
+    private var profile = Profile.SPACEBUDS
 
-    private var selectedProfile = Profile.SPACEBUDS
-    private var preferredDevice: AudioDeviceInfo? = null
-
-    private lateinit var deviceText: TextView
-    private lateinit var shizukuText: TextView
-    private lateinit var volumeText: TextView
-    private lateinit var volumeSeek: SeekBar
-    private lateinit var profileText: TextView
-    private lateinit var routeText: TextView
+    private lateinit var deviceView: TextView
+    private lateinit var routeView: TextView
+    private lateinit var profileView: TextView
+    private lateinit var volumeView: TextView
+    private lateinit var shizukuView: TextView
+    private lateinit var volumeBar: SeekBar
 
     private val sampleRate = 48_000
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
         audioManager = getSystemService(AudioManager::class.java)
 
         if (
@@ -61,204 +60,149 @@ class MainActivity : ComponentActivity() {
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.BLUETOOTH_CONNECT),
-                20
+                100
             )
         }
 
         buildUi()
-        refreshDevice()
+        refresh()
     }
 
     override fun onResume() {
         super.onResume()
-        refreshDevice()
+        refresh()
         updateShizuku()
         updateVolume()
     }
 
     override fun onDestroy() {
-        releaseEffects()
+        releaseAudio()
         super.onDestroy()
     }
 
     private fun buildUi() {
-        val scroll = ScrollView(this).apply {
-            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bg))
-        }
+        val scroll = ScrollView(this)
+        scroll.setBackgroundColor(color(R.color.bg))
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(28), dp(20), dp(28))
         }
-
         scroll.addView(root)
 
-        root.addView(text("SpaceBuds Z Audio", 28f, R.color.text_primary, true))
+        root.addView(text("SpaceBuds Z Audio", 28f, true))
         root.addView(
             text(
-                getString(R.string.app_subtitle),
-                15f,
-                R.color.text_secondary
+                "تحكم في صوت الوسائط واختبار الصوت للهاتف وسماعات Bluetooth.",
+                15f
             )
         )
-
-        addGap(root, 22)
+        gap(root, 20)
 
         val deviceCard = card()
-        deviceCard.addView(text("مخرج الصوت المتاح", 14f, R.color.text_secondary))
-        deviceText = text("جاري الفحص...", 18f, R.color.text_primary, true)
-        deviceCard.addView(deviceText)
+        deviceCard.addView(text("الجهاز المكتشف", 14f))
+        deviceView = text("فحص...", 18f, true)
+        deviceCard.addView(deviceView)
         deviceCard.addView(
-            text(
-                "التطبيق بيحاول يميز SpaceBuds Z OTW-625 تلقائيًا.",
-                13f,
-                R.color.text_secondary
-            )
+            text("مخصص لاكتشاف Oraimo SpaceBuds Z OTW-625 عند اتصالها.", 13f)
         )
         root.addView(deviceCard)
-
-        addGap(root, 12)
+        gap(root, 12)
 
         val routeCard = card()
-        routeCard.addView(text("مخرج اختبار الصوت", 14f, R.color.text_secondary))
-        routeText = text("تلقائي", 18f, R.color.text_primary, true)
-        routeCard.addView(routeText)
+        routeCard.addView(text("مخرج اختبار الصوت", 14f))
+        routeView = text("تلقائي", 18f, true)
+        routeCard.addView(routeView)
 
-        val routeRow = LinearLayout(this).apply {
+        val routes = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-
-        routeRow.addView(
-            button("SpaceBuds Z") { selectSpaceBudsRoute() },
-            weight = 1f
-        )
-        routeRow.addView(
-            button("سماعة الهاتف") { selectPhoneRoute() },
-            weight = 1f
-        )
-        routeRow.addView(
-            button("تلقائي") { selectAutomaticRoute() },
-            weight = 1f
-        )
-
-        routeCard.addView(routeRow)
+        addWeightButton(routes, "SpaceBuds Z") { chooseSpaceBuds() }
+        addWeightButton(routes, "سماعة الهاتف") { choosePhone() }
+        addWeightButton(routes, "تلقائي") { chooseAuto() }
+        routeCard.addView(routes)
         root.addView(routeCard)
-
-        addGap(root, 12)
+        gap(root, 12)
 
         val volumeCard = card()
-        volumeCard.addView(text("صوت الوسائط", 14f, R.color.text_secondary))
-        volumeText = text("", 18f, R.color.text_primary, true)
-        volumeCard.addView(volumeText)
+        volumeCard.addView(text("صوت الوسائط", 14f))
+        volumeView = text("", 18f, true)
+        volumeCard.addView(volumeView)
 
-        volumeSeek = SeekBar(this).apply {
-            max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            progress = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        }
-
-        volumeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(
-                seekBar: SeekBar?,
-                progress: Int,
-                fromUser: Boolean
-            ) {
-                volumeText.text =
-                    progress.toString() + " / " + volumeSeek.max.toString()
-
-                if (fromUser) {
-                    audioManager.setStreamVolume(
-                        AudioManager.STREAM_MUSIC,
-                        progress,
-                        0
-                    )
+        volumeBar = SeekBar(this)
+        volumeCard.addView(volumeBar)
+        volumeBar.setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    seekBar: SeekBar?,
+                    progress: Int,
+                    fromUser: Boolean
+                ) {
+                    volumeView.text =
+                        progress.toString() + " / " + volumeBar.max.toString()
+                    if (fromUser) {
+                        audioManager.setStreamVolume(
+                            AudioManager.STREAM_MUSIC,
+                            progress,
+                            0
+                        )
+                    }
                 }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-        })
-
-        volumeCard.addView(volumeSeek)
+        )
         root.addView(volumeCard)
-
-        addGap(root, 12)
+        gap(root, 12)
 
         val profileCard = card()
-        profileCard.addView(text("ملف الصوت", 14f, R.color.text_secondary))
-        profileText = text(
-            selectedProfile.label,
-            18f,
-            R.color.text_primary,
-            true
-        )
-        profileCard.addView(profileText)
+        profileCard.addView(text("ملف الصوت", 14f))
+        profileView = text(profile.label, 18f, true)
+        profileCard.addView(profileView)
 
-        val profileRow = LinearLayout(this).apply {
+        val profiles = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-
-        profileRow.addView(
-            button("SpaceBuds Z") {
-                applyProfile(Profile.SPACEBUDS)
-            },
-            weight = 1f
-        )
-        profileRow.addView(
-            button("هاتف") {
-                applyProfile(Profile.PHONE)
-            },
-            weight = 1f
-        )
-        profileRow.addView(
-            button("Flat") {
-                applyProfile(Profile.FLAT)
-            },
-            weight = 1f
-        )
-
-        profileCard.addView(profileRow)
+        addWeightButton(profiles, "SpaceBuds Z") {
+            setProfile(Profile.SPACEBUDS)
+        }
+        addWeightButton(profiles, "هاتف") {
+            setProfile(Profile.PHONE)
+        }
+        addWeightButton(profiles, "Flat") {
+            setProfile(Profile.FLAT)
+        }
+        profileCard.addView(profiles)
         root.addView(profileCard)
-
-        addGap(root, 12)
+        gap(root, 12)
 
         val testCard = card()
-        testCard.addView(text("اختبار التحسين", 14f, R.color.text_secondary))
+        testCard.addView(text("اختبار الصوت", 14f))
         testCard.addView(
             text(
-                "الـEQ والـBass والـLoudness بيتطبقوا على جلسة الصوت اللي التطبيق نفسه بيشغلها.",
-                13f,
-                R.color.text_secondary
+                "التحسين هنا مرتبط بصوت التطبيق نفسه، وليس بكل تطبيقات الهاتف.",
+                13f
             )
         )
 
-        val bassSeek = SeekBar(this).apply {
+        val bassBar = SeekBar(this).apply {
             max = 1000
             progress = 450
         }
+        testCard.addView(text("Bass", 13f))
+        testCard.addView(bassBar)
 
-        testCard.addView(text("Bass", 13f, R.color.text_secondary))
-        testCard.addView(bassSeek)
-
-        val loudSeek = SeekBar(this).apply {
+        val loudBar = SeekBar(this).apply {
             max = 1200
             progress = 600
         }
+        testCard.addView(text("Loudness", 13f))
+        testCard.addView(loudBar)
 
-        testCard.addView(text("Loudness", 13f, R.color.text_secondary))
-        testCard.addView(loudSeek)
-
-        bassSeek.setOnSeekBarChangeListener(
-            effectListener { value ->
-                try {
-                    bassBoost?.setStrength(value)
-                } catch (_: Throwable) {
-                }
-            }
-        )
-
-        loudSeek.setOnSeekBarChangeListener(
+        bassBar.setOnSeekBarChangeListener(
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(
                     seekBar: SeekBar?,
@@ -267,7 +211,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     if (fromUser) {
                         try {
-                            loudnessEnhancer?.setTargetGain(progress.toFloat())
+                            bass?.setStrength(progress.toShort())
                         } catch (_: Throwable) {
                         }
                     }
@@ -278,171 +222,112 @@ class MainActivity : ComponentActivity() {
             }
         )
 
-        testCard.addView(
-            button("تشغيل اختبار صوتي") {
-                playTest(
-                    bassSeek.progress,
-                    loudSeek.progress
-                )
+        loudBar.setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    seekBar: SeekBar?,
+                    progress: Int,
+                    fromUser: Boolean
+                ) {
+                    if (fromUser) {
+                        try {
+                            loudness?.setTargetGain(progress)
+                        } catch (_: Throwable) {
+                        }
+                    }
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             }
         )
 
-        testCard.addView(
-            button("إيقاف") {
-                stopTest()
-            }
-        )
-
+        testCard.addView(button("تشغيل اختبار 6 ثواني") {
+            playTest(bassBar.progress, loudBar.progress)
+        })
+        testCard.addView(button("إيقاف") { stopTest() })
         root.addView(testCard)
-
-        addGap(root, 12)
+        gap(root, 12)
 
         val systemCard = card()
-        systemCard.addView(text("تحكم النظام", 14f, R.color.text_secondary))
-
-        systemCard.addView(
-            button("فتح إعدادات الصوت") {
-                startActivity(
-                    android.content.Intent(
-                        Settings.ACTION_SOUND_SETTINGS
-                    )
-                )
-            }
-        )
-
-        systemCard.addView(
-            button("فتح اختيار مخرج الصوت") {
-                openOutputSwitcher()
-            }
-        )
-
+        systemCard.addView(text("تحكم النظام", 14f))
+        systemCard.addView(button("إعدادات الصوت") {
+            startActivity(Intent(Settings.ACTION_SOUND_SETTINGS))
+        })
+        systemCard.addView(button("اختيار مخرج الصوت") {
+            openOutputSwitcher()
+        })
         root.addView(systemCard)
-
-        addGap(root, 12)
+        gap(root, 12)
 
         val shizukuCard = card()
-        shizukuCard.addView(text("Shizuku", 14f, R.color.text_secondary))
-        shizukuText = text("", 17f, R.color.text_primary, true)
-        shizukuCard.addView(shizukuText)
-
+        shizukuCard.addView(text("Shizuku", 14f))
+        shizukuView = text("", 17f, true)
+        shizukuCard.addView(shizukuView)
         shizukuCard.addView(
             text(
-                "التطبيق بيستخدم Shizuku للفحص فقط، ومش بيشغل أوامر صوت داخلية غير موثقة.",
-                13f,
-                R.color.text_secondary
+                "يُستخدم للفحص فقط. لا توجد أوامر صوت داخلية غير موثقة.",
+                13f
             )
         )
-
         root.addView(shizukuCard)
 
         setContentView(scroll)
-        updateShizuku()
         updateVolume()
+        updateShizuku()
     }
 
-    private fun refreshDevice() {
-        if (!::deviceText.isInitialized) return
+    private fun refresh() {
+        if (!::deviceView.isInitialized) return
 
         val outputs = try {
-            audioManager
-                .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                .toList()
-        } catch (_: SecurityException) {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+        } catch (_: Throwable) {
             emptyList()
         }
 
-        val earbuds = outputs.firstOrNull {
+        val buds = outputs.firstOrNull {
             it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP &&
-                it.productName.toString()
-                    .contains("SpaceBuds", ignoreCase = true)
+                it.productName.toString().contains("SpaceBuds", true)
         }
 
-        val anyBluetooth = outputs.firstOrNull {
+        val bluetooth = outputs.firstOrNull {
             it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
         }
 
-        deviceText.text = when {
-            earbuds != null ->
-                "Oraimo SpaceBuds Z OTW-625 متصلة"
-            anyBluetooth != null ->
-                "Bluetooth: " + anyBluetooth.productName.toString()
+        deviceView.text = when {
+            buds != null -> "Oraimo SpaceBuds Z OTW-625 متصلة"
+            bluetooth != null ->
+                "Bluetooth: " + bluetooth.productName.toString()
             outputs.any {
                 it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-            } ->
-                "سماعة الهاتف"
-            else ->
-                "مخرج صوت غير معروف"
-        }
-
-        if (preferredDevice != null && !outputs.contains(preferredDevice)) {
-            preferredDevice = null
-            routeText.text = "تلقائي"
-        }
-
-        if (earbuds != null && preferredDevice == null) {
-            preferredDevice = earbuds
-            routeText.text = "SpaceBuds Z"
-            selectedProfile = Profile.SPACEBUDS
-            profileText.text = selectedProfile.label
+            } -> "سماعة الهاتف"
+            else -> "مخرج غير معروف"
         }
     }
 
-    private fun findSpaceBuds(): AudioDeviceInfo? {
-        val outputs = try {
-            audioManager
-                .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                .toList()
-        } catch (_: SecurityException) {
-            emptyList()
-        }
+    private fun chooseSpaceBuds() {
+        route = findSpaceBuds()
 
-        return outputs.firstOrNull {
-            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP &&
-                it.productName.toString()
-                    .contains("SpaceBuds", ignoreCase = true)
-        }
-    }
-
-    private fun findPhoneSpeaker(): AudioDeviceInfo? {
-        val outputs = try {
-            audioManager
-                .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                .toList()
-        } catch (_: SecurityException) {
-            emptyList()
-        }
-
-        return outputs.firstOrNull {
-            it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-        }
-    }
-
-    private fun selectSpaceBudsRoute() {
-        val earbuds = findSpaceBuds()
-
-        if (earbuds == null) {
+        if (route == null) {
             Toast.makeText(
                 this,
-                "SpaceBuds Z مش متاحة حاليًا",
+                "SpaceBuds Z مش متصلة حاليًا",
                 Toast.LENGTH_SHORT
             ).show()
             return
         }
 
-        preferredDevice = earbuds
-        routeText.text = "SpaceBuds Z"
-        selectedProfile = Profile.SPACEBUDS
-        profileText.text = selectedProfile.label
-
-        if (testTrack != null) {
-            applyPreferredDevice()
-        }
+        routeView.text = "SpaceBuds Z"
+        profile = Profile.SPACEBUDS
+        profileView.text = profile.label
+        applyRoute()
     }
 
-    private fun selectPhoneRoute() {
-        val speaker = findPhoneSpeaker()
+    private fun choosePhone() {
+        route = findPhoneSpeaker()
 
-        if (speaker == null) {
+        if (route == null) {
             Toast.makeText(
                 this,
                 "سماعة الهاتف مش متاحة",
@@ -451,75 +336,62 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        preferredDevice = speaker
-        routeText.text = "سماعة الهاتف"
-        selectedProfile = Profile.PHONE
-        profileText.text = selectedProfile.label
+        routeView.text = "سماعة الهاتف"
+        profile = Profile.PHONE
+        profileView.text = profile.label
+        applyRoute()
+    }
 
-        if (testTrack != null) {
-            applyPreferredDevice()
+    private fun chooseAuto() {
+        route = null
+        routeView.text = "تلقائي"
+        applyRoute()
+    }
+
+    private fun findSpaceBuds(): AudioDeviceInfo? {
+        return try {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP &&
+                        it.productName.toString().contains("SpaceBuds", true)
+                }
+        } catch (_: Throwable) {
+            null
         }
     }
 
-    private fun selectAutomaticRoute() {
-        preferredDevice = null
-        routeText.text = "تلقائي"
-        if (testTrack != null) {
-            applyPreferredDevice()
+    private fun findPhoneSpeaker(): AudioDeviceInfo? {
+        return try {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                }
+        } catch (_: Throwable) {
+            null
         }
     }
 
-    private fun applyPreferredDevice() {
-        val track = testTrack ?: return
-
+    private fun applyRoute() {
         try {
-            val ok = track.setPreferredDevice(preferredDevice)
-            if (!ok && preferredDevice != null) {
-                Toast.makeText(
-                    this,
-                    "Android رفض اختيار مخرج الاختبار",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
+            track?.setPreferredDevice(route)
         } catch (_: Throwable) {
         }
     }
 
-    private fun updateShizuku() {
-        shizukuText.text =
-            if (Shizuku.pingBinder()) "متصل وجاهز" else "غير متصل"
-    }
+    private fun setProfile(value: Profile) {
+        profile = value
+        profileView.text = value.label
 
-    private fun updateVolume() {
-        if (!::volumeSeek.isInitialized) return
-
-        volumeSeek.max =
-            audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-
-        volumeSeek.progress =
-            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-
-        volumeText.text =
-            volumeSeek.progress.toString() +
-                " / " +
-                volumeSeek.max.toString()
-    }
-
-    private fun applyProfile(profile: Profile) {
-        selectedProfile = profile
-        profileText.text = profile.label
-
-        if (testTrack == null) {
-            startAudioSession()
+        if (track == null) {
+            startAudio()
         }
 
-        val eq = equalizer ?: return
+        val effect = eq ?: return
 
         try {
-            eq.enabled = true
-
-            val count = eq.numberOfBands.toInt()
-            val gains = when (profile) {
+            effect.enabled = true
+            val count = effect.numberOfBands.toInt()
+            val gains = when (value) {
                 Profile.SPACEBUDS ->
                     floatArrayOf(450f, 250f, 50f, 150f, 350f)
                 Profile.PHONE ->
@@ -528,25 +400,25 @@ class MainActivity : ComponentActivity() {
                     floatArrayOf(0f, 0f, 0f, 0f, 0f)
             }
 
-            val min = eq.bandLevelRange[0].toFloat()
-            val max = eq.bandLevelRange[1].toFloat()
+            val min = effect.bandLevelRange[0].toFloat()
+            val max = effect.bandLevelRange[1].toFloat()
 
             for (band in 0 until count) {
-                val gain = gains[
-                    minOf(band, gains.lastIndex)
-                ].coerceIn(min, max)
+                val level = gains[minOf(band, gains.lastIndex)]
+                    .coerceIn(min, max)
+                    .toInt()
 
-                eq.setBandLevel(
+                effect.setBandLevel(
                     band.toShort(),
-                    gain.toInt().toShort()
+                    level.toShort()
                 )
             }
         } catch (_: Throwable) {
         }
     }
 
-    private fun startAudioSession() {
-        releaseEffects()
+    private fun startAudio() {
+        releaseAudio()
 
         val minBuffer = AudioTrack.getMinBufferSize(
             sampleRate,
@@ -565,93 +437,86 @@ class MainActivity : ComponentActivity() {
             .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
             .build()
 
-        testTrack = AudioTrack.Builder()
+        track = AudioTrack.Builder()
             .setAudioAttributes(attrs)
             .setAudioFormat(format)
             .setBufferSizeInBytes(maxOf(minBuffer, 24_000))
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        applyPreferredDevice()
-
-        val session = testTrack!!.audioSessionId
+        applyRoute()
 
         try {
-            equalizer = Equalizer(0, session)
-            bassBoost = BassBoost(0, session)
-            loudnessEnhancer = LoudnessEnhancer(session)
+            val session = track!!.audioSessionId
+            eq = Equalizer(0, session)
+            bass = BassBoost(0, session)
+            loudness = LoudnessEnhancer(session)
 
-            equalizer?.enabled = true
-            bassBoost?.enabled = true
-            loudnessEnhancer?.enabled = true
+            eq?.enabled = true
+            bass?.enabled = true
+            loudness?.enabled = true
 
-            applyProfile(selectedProfile)
+            setProfile(profile)
         } catch (_: Throwable) {
         }
     }
 
-    private fun playTest(bass: Int, loudness: Int) {
-        startAudioSession()
+    private fun playTest(bassValue: Int, loudnessValue: Int) {
+        startAudio()
 
         try {
-            bassBoost?.setStrength(bass.toShort())
-            loudnessEnhancer?.setTargetGain(loudness.toFloat())
+            bass?.setStrength(bassValue.toShort())
+            loudness?.setTargetGain(loudnessValue)
         } catch (_: Throwable) {
         }
 
         val seconds = 6
         val samples = sampleRate * seconds
-        val buffer = ShortArray(samples * 2)
+        val data = ShortArray(samples * 2)
 
         for (i in 0 until samples) {
             val time = i.toDouble() / sampleRate.toDouble()
-            val sweep =
+            val frequency =
                 120.0 * Math.pow(12.0, time / seconds.toDouble())
 
             val value = (
-                sin(2.0 * PI * sweep * time) *
+                sin(2.0 * PI * frequency * time) *
                     0.24 *
                     Short.MAX_VALUE.toDouble()
-                )
-                .toInt()
-                .toShort()
+                ).toInt().toShort()
 
-            buffer[i * 2] = value
-            buffer[i * 2 + 1] = value
+            data[i * 2] = value
+            data[i * 2 + 1] = value
         }
 
-        testTrack?.play()
+        track?.play()
 
         Thread {
+            var offset = 0
             try {
-                var offset = 0
-
                 while (
-                    offset < buffer.size &&
-                    testTrack?.playState ==
-                    AudioTrack.PLAYSTATE_PLAYING
+                    offset < data.size &&
+                    track?.playState == AudioTrack.PLAYSTATE_PLAYING
                 ) {
-                    val written = testTrack?.write(
-                        buffer,
+                    val written = track?.write(
+                        data,
                         offset,
-                        minOf(4096, buffer.size - offset)
+                        minOf(4096, data.size - offset)
                     ) ?: 0
 
                     if (written <= 0) break
                     offset += written
                 }
             } finally {
-                runOnUiThread {
-                    stopTest()
-                }
+                runOnUiThread { stopTest() }
             }
         }.start()
     }
 
     private fun stopTest() {
         try {
-            testTrack?.pause()
-            testTrack?.flush()
+            track?.pause()
+            track?.flush()
         } catch (_: Throwable) {
         }
     }
@@ -659,82 +524,62 @@ class MainActivity : ComponentActivity() {
     private fun openOutputSwitcher() {
         try {
             startActivity(
-                android.content.Intent(
-                    "android.settings.MEDIA_OUTPUT_SETTINGS"
-                )
+                Intent("android.settings.MEDIA_OUTPUT_SETTINGS")
             )
-        } catch (_: Exception) {
-            startActivity(
-                android.content.Intent(
-                    Settings.ACTION_SOUND_SETTINGS
-                )
-            )
+        } catch (_: Throwable) {
+            startActivity(Intent(Settings.ACTION_SOUND_SETTINGS))
         }
     }
 
-    private fun releaseEffects() {
-        try { testTrack?.stop() } catch (_: Throwable) {}
-        try { testTrack?.release() } catch (_: Throwable) {}
-        try { equalizer?.release() } catch (_: Throwable) {}
-        try { bassBoost?.release() } catch (_: Throwable) {}
-        try { loudnessEnhancer?.release() } catch (_: Throwable) {}
+    private fun updateVolume() {
+        if (!::volumeBar.isInitialized) return
 
-        testTrack = null
-        equalizer = null
-        bassBoost = null
-        loudnessEnhancer = null
+        volumeBar.max =
+            audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+
+        volumeBar.progress =
+            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+
+        volumeView.text =
+            volumeBar.progress.toString() +
+                " / " +
+                volumeBar.max.toString()
     }
 
-    private fun effectListener(
-        action: (Short) -> Unit
-    ): SeekBar.OnSeekBarChangeListener =
-        object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(
-                seekBar: SeekBar?,
-                progress: Int,
-                fromUser: Boolean
-            ) {
-                if (fromUser) {
-                    action(progress.toShort())
-                }
-            }
+    private fun updateShizuku() {
+        shizukuView.text =
+            if (Shizuku.pingBinder()) "متصل وجاهز" else "غير متصل"
+    }
 
-            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-        }
+    private fun releaseAudio() {
+        try { track?.stop() } catch (_: Throwable) {}
+        try { track?.release() } catch (_: Throwable) {}
+        try { eq?.release() } catch (_: Throwable) {}
+        try { bass?.release() } catch (_: Throwable) {}
+        try { loudness?.release() } catch (_: Throwable) {}
+
+        track = null
+        eq = null
+        bass = null
+        loudness = null
+    }
 
     private fun card(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                dp(16),
-                dp(16),
-                dp(16),
-                dp(16)
-            )
-            setBackgroundColor(
-                ContextCompat.getColor(
-                    this@MainActivity,
-                    R.color.surface
-                )
-            )
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setBackgroundColor(color(R.color.surface))
         }
 
     private fun text(
         value: String,
         size: Float,
-        colorRes: Int,
         bold: Boolean = false
     ): TextView =
         TextView(this).apply {
             text = value
             textSize = size
-            setTextColor(
-                ContextCompat.getColor(
-                    this@MainActivity,
-                    colorRes
-                )
-            )
+            setTextColor(color(R.color.text_primary))
             if (bold) {
                 setTypeface(
                     typeface,
@@ -751,13 +596,8 @@ class MainActivity : ComponentActivity() {
         TextView(this).apply {
             text = label
             textSize = 15f
-            setTextColor(
-                ContextCompat.getColor(
-                    this@MainActivity,
-                    R.color.text_primary
-                )
-            )
             gravity = Gravity.CENTER
+            setTextColor(color(R.color.text_primary))
             setPadding(
                 dp(12),
                 dp(12),
@@ -767,39 +607,38 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { action() }
         }
 
-    private fun LinearLayout.addView(
-        view: View,
-        weight: Float
+    private fun addWeightButton(
+        row: LinearLayout,
+        label: String,
+        action: () -> Unit
     ) {
-        addView(
-            view,
+        row.addView(
+            button(label, action),
             LinearLayout.LayoutParams(
                 0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-                weight
+                1f
             )
         )
     }
 
-    private fun addGap(
-        root: LinearLayout,
-        valueDp: Int
-    ) {
+    private fun gap(root: LinearLayout, sizeDp: Int) {
         root.addView(
             Space(this),
             LinearLayout.LayoutParams(
                 1,
-                dp(valueDp)
+                dp(sizeDp)
             )
         )
     }
 
+    private fun color(id: Int): Int =
+        ContextCompat.getColor(this, id)
+
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
-    private enum class Profile(
-        val label: String
-    ) {
+    private enum class Profile(val label: String) {
         SPACEBUDS("SpaceBuds Z"),
         PHONE("هاتف"),
         FLAT("Flat")
