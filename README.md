@@ -1,2 +1,22 @@
 # SpaceBudsZ-Audio
-Kotlin Android audio control and enhancement app for phone speakers and Bluetooth earbuds, optimized for Oraimo SpaceBuds Z OTW-625.
+
+تطبيق Kotlin لـ Android 12+ للتحكم في مستوى صوت الوسائط، اكتشاف مخرج Bluetooth، وتجربة EQ/Bass/Loudness مناسبة لـ Oraimo SpaceBuds Z OTW-625.
+
+## مهم
+
+تطبيقات Android العادية لا تملك API موثقة تسمح لها بفرض EQ أو Loudness على كل صوت كل التطبيقات على مستوى النظام. لذلك التحسين الصوتي داخل التطبيق مرتبط بجلسة الصوت التي ينشئها التطبيق نفسه. التحكم في مستوى صوت الوسائط واكتشاف مخرج الصوت يعملان من خلال APIs النظام الرسمية.
+
+تطبيق Oraimo الرسمي يذكر أن SpaceBuds Z OTW-625 تستخدم Bluetooth 5.4 ووضع Game Mode.
+
+Shizuku مدمج كتكامل اختياري لفحص حالة الاتصال فقط حاليًا. لا توجد أوامر داخلية غير موثقة لتعديل الصوت.
+
+## الخصوصية
+
+لا يحتاج التطبيق إلى إنترنت.
+لا ينشئ ملفات سجل.
+لا يسجل الميكروفون.
+لا يرفع بيانات الجهاز أو Bluetooth إلى أي خادم.
+
+## البناء
+
+Workflow باسم "Android APK" يبني "app-debug.apk" مع كل push على main أو يدويًا من GitHub Actions.
